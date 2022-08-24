@@ -1,0 +1,1 @@
+() recv_internal() { } (int) gcd(int a, int b) method_id { while b { (a, b) = (b, a % b); } return a; }

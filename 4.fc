@@ -1,0 +1,104 @@
+{-
+
+  TASK 4 - (De)Serialize to Cell
+  Write the methods
+    a) for serialization of tuple of arbitrary values of different types to Cell
+    b) for deserialization of Cell created by method above to original tuple
+
+  `serialize` method gets as input tuple with arbitrary number of elements from 0
+  to 128 (both 0 and 128 elements are allowed) and outputs Cell. Elements of the
+  tuple may be `null`, `int`, `cell`, `slice`, `tuple` (with the same limitations
+  as original tuple). It is guaranteed that the maximum nesting level of tuples
+  is less than 4 and total number of elements less than 1024.
+  `deserialize` method gets a cell produced by `serialize` method and should
+  return origin tuple.
+
+  Note, for illustrative purposes`serialize_t3` and `deserialize_t3` functions
+  which serialize and deserialize tuple with exactly 3 elements
+  (only null, int, cell and slice are supportd) to/from a cell  have been added.
+  Participants are free to not use logic from there and come up with their own
+  implementations.
+
+  Tests will only check that test_tuple == deserialize(serialize(test_tuple)).
+  Intermediate representation can be arbitrary.
+-}
+
+forall X -> X get_tuple_element(tuple t, int pos) asm "INDEXVARQ";
+
+() recv_internal() {
+}
+
+cell serialize_element(cell dict, var x) {
+  builder b = begin_cell();
+  (int k, _, int f) = dict.udict_get_max?(256);
+  k = f ? k + 1 : 0;
+  if(is_null(x)) {
+    b = b.store_uint(0,3);
+  }
+  if(is_int(x)) {
+    int i_x = force_cast_to_int(x);
+    b = b.store_uint(1,3).store_int(i_x, 257);
+  }
+  if(is_cell(x)) {
+    cell c_x = force_cast_to_cell(x);
+    b = b.store_uint(2,3).store_ref(c_x);
+  }
+  if(is_slice(x)) {
+    slice s_x = force_cast_to_slice(x);
+    b = b.store_uint(3,3).store_ref(begin_cell().store_slice(s_x).end_cell());
+  }
+  if(is_tuple(x)) {
+    tuple t_x = force_cast_to_tuple(x);
+    int tlen = t_x.tuple_length();
+    int n = 0;
+    cell newDict = new_dict();
+    repeat (tlen) {
+      var newX = t_x.get_tuple_element(n);
+      newDict = serialize_element(newDict, newX);
+      n += 1;
+    }
+    b = b.store_uint(4, 3).store_dict(newDict);
+  }
+  dict~udict_set_builder(256, k, b);
+  return dict;
+}
+
+(tuple) deserialize_element_to_tuple(slice s, var t) {
+  int element_type = is_null(t) ? 4 : s~load_uint(3);
+  if(element_type == 0) {
+    t~tpush(null());
+  }
+  if(element_type == 1) {
+    t~tpush(s~load_int(257));
+  }
+  if(element_type == 2) {
+    t~tpush(s~load_ref());
+  }
+  if(element_type == 3) {
+    t~tpush(s~load_ref().begin_parse());
+  }
+  if(element_type == 4) {
+    tuple new_t = empty_tuple();
+    cell dict = s~load_dict();
+    int k = -1;
+    int f = -1;
+    while (f) {
+      (k, slice new_s, f) = dict.udict_get_next?(256, k);
+      if (f) {
+        new_t = deserialize_element_to_tuple(new_s, new_t);
+      }
+    }
+    t = is_null(t) ? new_t : t.tpush(new_t);
+  }
+  return (t);
+}
+
+;; testable
+(cell) serialize(tuple values) method_id {
+  return serialize_element(new_dict(), values);
+}
+
+;; testable
+(tuple) deserialize(cell serialized) method_id {
+  return deserialize_element_to_tuple(serialized.begin_parse(), null());
+}
